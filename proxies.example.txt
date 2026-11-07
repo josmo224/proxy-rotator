@@ -1,0 +1,17 @@
+# Proxy list — one proxy per line.
+# Copy this file to proxies.txt, or let the app build it for you with
+#   python fetch_proxies.py
+#
+# Accepted formats:
+#   1.2.3.4:8080
+#   http://1.2.3.4:8080
+#   http://user:pass@1.2.3.4:8080
+#   https://user:pass@1.2.3.4:8443
+#   socks5://user:pass@1.2.3.4:1080
+#   socks4://1.2.3.4:1080
+#
+# Lines starting with # are ignored.
+#
+# Examples (replace with real proxies — these are not real):
+#   203.0.113.10:8080
+#   socks5://198.51.100.7:1080

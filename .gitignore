@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime state (generated on your machine)
+proxies.txt
+used.txt
+current.txt
+.sysproxy_prev.json
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

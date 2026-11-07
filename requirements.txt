@@ -1,0 +1,2 @@
+# Runtime dependency: the native desktop window (Edge WebView2 on Windows)
+pywebview>=5.0

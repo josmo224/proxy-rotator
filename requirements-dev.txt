@@ -1,0 +1,2 @@
+# Only needed to regenerate the app icon (make_icon.py)
+pillow>=10.0
