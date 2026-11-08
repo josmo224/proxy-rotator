@@ -194,6 +194,8 @@ def main() -> int:
     ap.add_argument("--db", default="proxies.db", help="persistent proxy database (grows every run)")
     ap.add_argument("--recheck-hours", type=float, default=0,
                     help="also re-check known proxies not checked in this many hours (default: off)")
+    ap.add_argument("--recheck-dead", action="store_true",
+                    help="re-check proxies currently marked dead (false negatives from a busy run)")
     cfg = ap.parse_args()
 
     t0 = time.time()
@@ -218,6 +220,16 @@ def main() -> int:
         if revived:
             print(f"{len(revived)} known proxies queued for re-check")
             proxies.extend(revived)
+
+    if cfg.recheck_dead:
+        seen = {p.key for p in proxies}
+        dead = [rotator.Proxy(s, h, pt) for k, s, h, pt in store.dead_entries()
+                if k not in seen]
+        for p in dead:
+            seen.add(p.key)
+        if dead:
+            print(f"{len(dead)} proxies marked dead queued for a second chance")
+            proxies.extend(dead)
 
     if cfg.no_check:
         working = proxies

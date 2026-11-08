@@ -34,7 +34,7 @@ if ($pyLauncher) {
 
 $action = New-ScheduledTaskAction `
     -Execute $exe `
-    -Argument ($prefix + "fetch_proxies.py --recheck-hours 24 --concurrency 1200 --timeout 5") `
+    -Argument ($prefix + "fetch_proxies.py --recheck-hours 24 --concurrency 400 --timeout 6") `
     -WorkingDirectory $proj
 
 $trigger = New-ScheduledTaskTrigger -Daily -At $At

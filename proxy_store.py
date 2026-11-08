@@ -102,6 +102,13 @@ class ProxyStore:
             (cutoff, limit),
         ))
 
+    def dead_entries(self, limit: int = 0) -> list[tuple[str, str, str, int]]:
+        """Proxies currently marked dead, for a second-chance re-check."""
+        sql = "SELECT key, scheme, host, port FROM proxies WHERE alive=0"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
+        return list(self.db.execute(sql))
+
     def all_proxies(self, limit: int | None = None) -> list[tuple[str, str, str, int]]:
         sql = "SELECT key, scheme, host, port FROM proxies"
         if limit:
