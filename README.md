@@ -160,6 +160,33 @@ complete a real HTTPS request. Results are written to `proxies.txt`, fastest fir
 Realistic yield: of ~34,000 raw entries, roughly 5% work, giving around
 **1,500–2,000 proxies / ~900 unique IPs** per run.
 
+### Growing the pool every day
+
+Every proxy ever discovered is stored in `proxies.db` (SQLite) with the time it
+was first and last seen and its last check result. That means the pool
+**accumulates** instead of resetting: proxies that were down yesterday get
+re-checked and can come back.
+
+Install a daily automatic refresh (Windows Task Scheduler):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install_daily_task.ps1
+```
+
+- runs every day at 03:00 (change with `-At "04:30"`)
+- downloads new lists, adds new proxies, and re-checks ones not seen in 24h
+- rewrites `proxies.txt` with everything currently working
+
+Remove it later with `... -Remove`. Run it once by hand any time with
+`daily_refresh.bat`.
+
+> **On "millions of IPs":** public free lists hold ~30–40k entries at any moment,
+> of which ~5% work — so a single run yields roughly 900 unique working IPs, and
+> the database grows by a few thousand entries per day as new proxies appear.
+> Millions of usable IPs only exist with paid providers (Bright Data, Oxylabs,
+> etc.), which are billed per GB. This tool works with any proxy list you supply,
+> including a paid one.
+
 ## How it works
 
 ```
@@ -181,6 +208,9 @@ app / browser ──► 127.0.0.1:8899 (this app) ──► upstream free proxy 
 | `webui.py` | the interface (HTML/CSS/JS) |
 | `sysproxy.py` | Windows system-proxy (VPN mode) toggle |
 | `fetch_proxies.py` | download and validate proxy lists |
+| `proxy_store.py` | SQLite store of every proxy ever seen |
+| `daily_refresh.bat` | one-shot daily refresh |
+| `install_daily_task.ps1` | registers the daily scheduled task |
 | `make_icon.py` | regenerates `proxyrotator.ico` (needs Pillow) |
 | `test_rotator.py` | self-test suite |
 | `proxies.example.txt` | proxy file format |

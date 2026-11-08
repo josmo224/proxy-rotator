@@ -23,6 +23,7 @@ import urllib.request
 from pathlib import Path
 
 import rotator
+from proxy_store import ProxyStore
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) proxy-list-fetcher"
 
@@ -146,12 +147,19 @@ async def validate(proxies: list[rotator.Proxy], concurrency: int, timeout: floa
     return alive
 
 
-def write_proxies(path: Path, proxies: list[rotator.Proxy], append: bool) -> None:
-    proxies = sorted(proxies, key=lambda p: (p.latency_ms or 99999))
+def write_proxies(path: Path, proxies: list, append: bool) -> None:
+    """Write proxy keys (strings or Proxy objects) fastest-first."""
+    def key(p):
+        return p.key if hasattr(p, "key") else str(p)
+
+    def lat(p):
+        return (p.latency_ms if getattr(p, "latency_ms", None) is not None else 99999)
+
+    proxies = sorted(proxies, key=lat)
     mode = "a" if append else "w"
     with path.open(mode, encoding="utf-8") as fh:
         for p in proxies:
-            fh.write(p.key + "\n")
+            fh.write(key(p) + "\n")
 
 
 async def refresh(cfg) -> tuple[list[rotator.Proxy], dict]:
@@ -183,14 +191,33 @@ def main() -> int:
     ap.add_argument("--download-timeout", type=float, default=30, help="per-source download timeout (s)")
     ap.add_argument("--target", default="www.gstatic.com:443", help="host:port used to test proxies")
     ap.add_argument("--limit", type=int, default=0, help="stop once this many working proxies are found")
+    ap.add_argument("--db", default="proxies.db", help="persistent proxy database (grows every run)")
+    ap.add_argument("--recheck-hours", type=float, default=0,
+                    help="also re-check known proxies not checked in this many hours (default: off)")
     cfg = ap.parse_args()
 
     t0 = time.time()
+    store = ProxyStore(cfg.db)
     proxies = fetch_all(cfg.download_timeout)
     if not proxies:
         print("no proxies downloaded (network blocked?)")
         return 1
-    print(f"\n{len(proxies)} unique proxies downloaded in {time.time()-t0:.0f}s")
+    new = store.add_many(proxies)
+    print(f"\n{len(proxies)} unique proxies downloaded in {time.time()-t0:.0f}s"
+          f" ({new} never seen before)")
+
+    # revive known proxies that have not been checked recently
+    if cfg.recheck_hours > 0:
+        seen = {p.key for p in proxies}
+        revived = []
+        for key, scheme, host, port in store.stale(cfg.recheck_hours * 3600):
+            if key in seen:
+                continue
+            revived.append(rotator.Proxy(scheme, host, port))
+            seen.add(key)
+        if revived:
+            print(f"{len(revived)} known proxies queued for re-check")
+            proxies.extend(revived)
 
     if cfg.no_check:
         working = proxies
@@ -208,14 +235,23 @@ def main() -> int:
             return await validate(proxies, cfg.concurrency, cfg.timeout, cfg.target, cfg.limit)
 
         working = asyncio.run(_run())
+        store.update_results(proxies)
 
     if not working:
+        store.close()
         print("none of the proxies passed the check. try again - free lists rotate constantly.")
         return 1
 
+    # export everything currently known to work, not just this run's findings,
+    # so yesterday's survivors stay in the pool
+    alive = store.alive_keys()
     out = Path(cfg.out)
-    write_proxies(out, working, cfg.append)
-    print(f"saved {len(working)} working proxies to {out.resolve()}")
+    write_proxies(out, alive or working, cfg.append)
+    st = store.stats()
+    store.close()
+    print(f"saved {len(alive) or len(working)} working proxies to {out.resolve()}")
+    print(f"database: {st['total']} proxies ever seen, {st['unique_ips']} unique IPs, "
+          f"{st['alive']} alive now")
     print(f"total time {time.time()-t0:.0f}s")
     print(f"\nnext:  python rotator.py --proxies {out.name} --mode manual")
     return 0
