@@ -148,11 +148,17 @@ Free proxies die constantly. Use **Add fresh proxies** in the app, or:
 
 ```bat
 python fetch_proxies.py                          :: download + test + save
-python fetch_proxies.py --concurrency 1200 --timeout 5   :: faster pass
+python fetch_proxies.py --concurrency 400 --timeout 6    :: safest settings
+python fetch_proxies.py --recheck-dead           :: second chance for failed proxies
+python fetch_proxies.py --recheck-hours 24       :: re-check known proxies idle > 24h
 python fetch_proxies.py --limit 5000             :: stop after 5000 working
 python fetch_proxies.py --append                 :: merge with the existing file
 python fetch_proxies.py --no-check               :: download only
 ```
+
+> Use moderate `--concurrency` (300–500). Pushing it to 1000+ on a home connection
+> exhausts the router's connection table, which produces timeouts and marks working
+> proxies as dead.
 
 It pulls from ~45 public list sources, de-duplicates, and keeps only proxies that
 complete a real HTTPS request. Results are written to `proxies.txt`, fastest first.
