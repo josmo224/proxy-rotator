@@ -48,9 +48,10 @@ def build_config(proxy_port: int, ui_port: int):
     cfg.status_port = ui_port
     cfg.mode = "manual"
     cfg.host = "127.0.0.1"
-    # Gentle background checking so it never competes with browsing.
-    cfg.check_interval = 900
-    cfg.check_concurrency = 80
+    # Gentle background checking so it never competes with browsing, but high
+    # enough that a full pass over ~1500 proxies finishes quickly.
+    cfg.check_interval = 1800
+    cfg.check_concurrency = 250
     cfg.timeout = 8
     # verify against the same host the exit-IP check uses, so a proxy that
     # passes verification is one that actually works end to end
