@@ -166,6 +166,29 @@ complete a real HTTPS request. Results are written to `proxies.txt`, fastest fir
 Realistic yield: of ~34,000 raw entries, roughly 5% work, giving around
 **1,500–2,000 proxies / ~900 unique IPs** per run.
 
+### High-quality, stable pool + hourly refresh
+
+The app uses **only high-quality proxies**: alive right now, latency ≤ 1500 ms,
+and **passed at least two separate checks**. Every check increments a proxy's
+`ok_count`, so flaky proxies that work once and die are dropped automatically.
+Tune the bar with `--quality-latency` and `--quality-min-ok`.
+
+Install the hourly refresh (Windows Task Scheduler):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install_daily_task.ps1
+```
+
+- runs **every hour**
+- downloads new lists and adds proxies never seen before
+- re-checks only the proxies currently believed alive (not the 40k dead history)
+- rebuilds `proxies.txt` with the high-quality set only
+
+Remove it with `... -Remove`. Run it by hand any time with `daily_refresh.bat`.
+
+Result: `proxies.txt` stays small and clean (fast, repeatedly proven proxies)
+while `proxies.db` keeps accumulating every proxy ever discovered.
+
 ### Growing the pool every day
 
 Every proxy ever discovered is stored in `proxies.db` (SQLite) with the time it

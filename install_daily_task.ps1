@@ -1,20 +1,23 @@
-# Registers a Windows Scheduled Task that refreshes the proxy pool every day.
+# Registers a Windows Scheduled Task that refreshes the proxy pool every hour.
 #
 #   powershell -ExecutionPolicy Bypass -File install_daily_task.ps1
-#   powershell -ExecutionPolicy Bypass -File install_daily_task.ps1 -At 04:30
 #   powershell -ExecutionPolicy Bypass -File install_daily_task.ps1 -Remove
 #
+# Each run downloads fresh lists, adds new proxies, re-checks the live ones,
+# and rebuilds proxies.txt with only high-quality (fast + repeatedly proven)
+# proxies.
 param(
-    [string]$At = "03:00",
     [switch]$Remove
 )
 
 $ErrorActionPreference = "Stop"
 $proj = Split-Path -Parent $MyInvocation.MyCommand.Path
-$taskName = "ProxyRotator Daily Refresh"
+$taskName = "ProxyRotator Hourly Refresh"
+$oldName = "ProxyRotator Daily Refresh"
 
 if ($Remove) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $oldName -Confirm:$false -ErrorAction SilentlyContinue
     Write-Host "Removed scheduled task: $taskName"
     exit 0
 }
@@ -34,25 +37,30 @@ if ($pyLauncher) {
 
 $action = New-ScheduledTaskAction `
     -Execute $exe `
-    -Argument ($prefix + "fetch_proxies.py --recheck-hours 24 --concurrency 400 --timeout 6") `
+    -Argument ($prefix + "fetch_proxies.py --hourly --recheck-hours 1 --concurrency 400 --timeout 6") `
     -WorkingDirectory $proj
 
-$trigger = New-ScheduledTaskTrigger -Daily -At $At
+$trigger = New-ScheduledTaskTrigger `
+    -Once -At (Get-Date).AddMinutes(2) `
+    -RepetitionInterval (New-TimeSpan -Hours 1) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
 
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -DontStopIfGoingOnBatteries `
     -AllowStartIfOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+
+Unregister-ScheduledTask -TaskName $oldName -Confirm:$false -ErrorAction SilentlyContinue
 
 Register-ScheduledTask `
     -TaskName $taskName `
     -Action $action `
     -Trigger $trigger `
     -Settings $settings `
-    -Description "Downloads and validates free proxies daily, refreshing proxies.txt for Proxy Rotator." `
+    -Description "Refreshes the free proxy pool hourly, keeping only fast, repeatedly proven proxies." `
     -Force | Out-Null
 
-Write-Host "Registered '$taskName' - runs daily at $At."
+Write-Host "Registered '$taskName' - runs every hour."
 Write-Host "Run it now:  Start-ScheduledTask -TaskName '$taskName'"
 Write-Host "Remove it:   powershell -ExecutionPolicy Bypass -File install_daily_task.ps1 -Remove"

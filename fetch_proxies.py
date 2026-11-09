@@ -196,6 +196,12 @@ def main() -> int:
                     help="also re-check known proxies not checked in this many hours (default: off)")
     ap.add_argument("--recheck-dead", action="store_true",
                     help="re-check proxies currently marked dead (false negatives from a busy run)")
+    ap.add_argument("--hourly", action="store_true",
+                    help="fast hourly mode: download new lists and re-check only live candidates")
+    ap.add_argument("--quality-latency", type=float, default=1500,
+                    help="max latency (ms) for a proxy to count as high quality")
+    ap.add_argument("--quality-min-ok", type=int, default=2,
+                    help="checks a proxy must have passed to count as stable")
     cfg = ap.parse_args()
 
     t0 = time.time()
@@ -204,35 +210,50 @@ def main() -> int:
     if not proxies:
         print("no proxies downloaded (network blocked?)")
         return 1
+    existing = store.all_keys()
+    fresh = [p for p in proxies if p.key not in existing]
     new = store.add_many(proxies)
     print(f"\n{len(proxies)} unique proxies downloaded in {time.time()-t0:.0f}s"
           f" ({new} never seen before)")
 
-    # revive known proxies that have not been checked recently
-    if cfg.recheck_hours > 0:
-        seen = {p.key for p in proxies}
-        revived = []
-        for key, scheme, host, port in store.stale(cfg.recheck_hours * 3600):
-            if key in seen:
-                continue
-            revived.append(rotator.Proxy(scheme, host, port))
-            seen.add(key)
-        if revived:
-            print(f"{len(revived)} known proxies queued for re-check")
-            proxies.extend(revived)
+    if cfg.hourly:
+        # Busy-hour mode: check only brand-new proxies plus the ones currently
+        # believed alive. The 40k dead/history entries are not re-scanned.
+        seen = {p.key for p in fresh}
+        check_list = list(fresh)
+        for k, s, h, pt in store.alive_entries():
+            if k not in seen:
+                seen.add(k)
+                check_list.append(rotator.Proxy(s, h, pt))
+        print(f"hourly mode: checking {len(fresh)} new + "
+              f"{len(check_list) - len(fresh)} live = {len(check_list)} proxies")
+    else:
+        check_list = proxies
+        # revive known proxies that have not been checked recently
+        if cfg.recheck_hours > 0:
+            seen = {p.key for p in check_list}
+            revived = []
+            for key, scheme, host, port in store.stale(cfg.recheck_hours * 3600):
+                if key in seen:
+                    continue
+                revived.append(rotator.Proxy(scheme, host, port))
+                seen.add(key)
+            if revived:
+                print(f"{len(revived)} known proxies queued for re-check")
+                check_list.extend(revived)
 
     if cfg.recheck_dead:
-        seen = {p.key for p in proxies}
+        seen = {p.key for p in check_list}
         dead = [rotator.Proxy(s, h, pt) for k, s, h, pt in store.dead_entries()
                 if k not in seen]
         for p in dead:
             seen.add(p.key)
         if dead:
             print(f"{len(dead)} proxies marked dead queued for a second chance")
-            proxies.extend(dead)
+            check_list.extend(dead)
 
     if cfg.no_check:
-        working = proxies
+        working = check_list
     else:
         async def _run():
             loop = asyncio.get_running_loop()
@@ -244,26 +265,30 @@ def main() -> int:
                 lp.default_exception_handler(ctx)
 
             loop.set_exception_handler(quiet)
-            return await validate(proxies, cfg.concurrency, cfg.timeout, cfg.target, cfg.limit)
+            return await validate(check_list, cfg.concurrency, cfg.timeout,
+                                  cfg.target, cfg.limit)
 
         working = asyncio.run(_run())
-        store.update_results(proxies)
+        store.update_results(check_list)
 
     if not working:
         store.close()
         print("none of the proxies passed the check. try again - free lists rotate constantly.")
         return 1
 
-    # export everything currently known to work, not just this run's findings,
-    # so yesterday's survivors stay in the pool
-    alive = store.alive_keys()
+    # Export the high-quality pool: alive now, within the latency cutoff, and
+    # proven across several checks. Fall back to this run's survivors early on.
+    quality = store.quality_keys(cfg.quality_latency, cfg.quality_min_ok)
+    fast_alive = store.alive_keys(max_latency_ms=cfg.quality_latency)
+    final = quality or fast_alive or working
     out = Path(cfg.out)
-    write_proxies(out, alive or working, cfg.append)
+    write_proxies(out, final, cfg.append)
     st = store.stats()
     store.close()
-    print(f"saved {len(alive) or len(working)} working proxies to {out.resolve()}")
-    print(f"database: {st['total']} proxies ever seen, {st['unique_ips']} unique IPs, "
-          f"{st['alive']} alive now")
+    print(f"saved {len(final)} HIGH-QUALITY proxies to {out.resolve()}"
+          f"  (<= {cfg.quality_latency:.0f} ms, passed >= {cfg.quality_min_ok} checks)")
+    print(f"database: {st['total']} seen, {st['unique_ips']} unique IPs, "
+          f"{st['alive']} alive, {st['quality']} high-quality")
     print(f"total time {time.time()-t0:.0f}s")
     print(f"\nnext:  python rotator.py --proxies {out.name} --mode manual")
     return 0
