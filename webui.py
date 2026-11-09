@@ -357,6 +357,13 @@ async function load() {
   } catch (e) { $('checkpill').innerHTML = '<span class="dot c"></span> server offline'; return; }
   const p = data.pool || {};
 
+  // the proxy can change without a button press (auto-failover) - re-verify
+  if (p.current !== lastCur) {
+    const changed = lastCur !== null;
+    lastCur = p.current;
+    if (changed) { exitIp = null; setTimeout(verifyIp, 0); }
+  }
+
   // big number = the address the world sees (verified exit IP); fall back to the
   // proxy address until the first verification completes
   $('cur').textContent = exitIp || p.current || (data.mode === 'manual' ? 'no proxy selected' : 'rotates every request');
@@ -478,6 +485,7 @@ function renderTable() {
 }
 
 let exitIp = null;
+let lastCur = null;
 
 async function switchIp() {
   const b = $('newip'); b.disabled = true;

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 rotator.py - a local rotating proxy server.
 
@@ -256,8 +256,11 @@ class ProxyPool:
         ips = {p.ip for p in self.proxies if p.alive is not False and p.ip not in self.used}
         return len(ips)
 
-    def advance(self) -> Proxy | None:
-        """Move the 'current' IP to the next unused address: fastest HTTP first."""
+    def advance(self, fallback: bool = False) -> Proxy | None:
+        """Move the 'current' IP to the next unused address: fastest HTTP first.
+
+        fallback=True is used for failover: if every address has been used, a
+        working proxy is better than no connection at all."""
         if not self.proxies:
             self._cur = None
             return None
@@ -292,6 +295,14 @@ class ProxyPool:
             self.used.clear()
             self._save_used()
             return self.advance()
+        if fallback:
+            # every address is used (or the pool is tiny): stay online rather
+            # than leave the user with no connection
+            cands = [p for p in self.proxies if p.alive is not False and p is not self._cur]
+            cands.sort(key=rank)
+            if cands:
+                self._cur = cands[0]
+                return cands[0]
         # exhausted: keep serving through the current IP, but never pick a used one
         return None
 
@@ -817,8 +828,10 @@ async def do_connect(reader, writer, target, cfg, pool, stats, sticky_map, clien
             stats.tick(False)
             if cfg.verbose:
                 print(f"[tunnel-fail] {proxy.label}: {exc}", flush=True)
-            # NOTE: manual mode does NOT auto-switch here. The IP only changes
-            # when the user presses NEW IP, so the app and the browser always agree.
+            # Auto-failover: a dead IP must never leave the user offline. Move to
+            # the next unused proxy and retry the request transparently.
+            if cfg.mode == "manual":
+                pool.advance(fallback=True)
             continue
 
         proxy.successes += 1
@@ -882,8 +895,9 @@ async def do_forward(reader, writer, method, target, version, headers, cfg, pool
     tried: set[str] = set()
     last_err = "no proxies available"
     if cfg.mode == "manual":
-        # One fixed IP: retrying the same proxy a second time just doubles the wait.
-        attempts = 1
+        # Auto-failover needs a couple of tries so a dead IP can be replaced
+        # mid-request instead of returning an error to the browser.
+        attempts = 3
     else:
         attempts = cfg.attempts if (idempotent or not has_body) else 1
 
@@ -938,9 +952,8 @@ async def do_forward(reader, writer, method, target, version, headers, cfg, pool
             if cfg.verbose:
                 print(f"[forward-fail] {proxy.label}: {exc}", flush=True)
             if cfg.mode == "manual":
-                pool.advance()
+                pool.advance(fallback=True)
             continue
-
         proxy.successes += 1
         stats.requests += 1
         stats.tick(True)
@@ -1169,13 +1182,14 @@ async def handle_status(reader, writer, pool: ProxyPool, stats: Stats, cfg) -> N
             pass
 
 
-async def advance_verified(pool: ProxyPool, cfg, tries: int = 4) -> Proxy | None:
+async def advance_verified(pool: ProxyPool, cfg, tries: int = 4,
+                           fallback: bool = False) -> Proxy | None:
     """Advance until we land on a proxy that actually works, so one press of
     NEW IP always yields a usable IP. Unverified ones are not burned."""
     if cfg.no_check:
-        return pool.advance()
+        return pool.advance(fallback=fallback)
     for _ in range(tries):
-        p = pool.advance()
+        p = pool.advance(fallback=fallback)
         if p is None:
             return None
         await check_proxy(p, cfg.check_host, cfg.check_port, min(cfg.timeout, 5), True)
@@ -1347,13 +1361,13 @@ async def run(cfg) -> None:
               + (f", {cfg.used_file} has {len(pool.used)} used" if used_path else ""))
         cur = pool.restore_current()
         if cur is not None and not cfg.no_check:
-            # don't trust a remembered IP blindly — it may have died since
+            # don't trust a remembered IP blindly â€” it may have died since
             await check_proxy(cur, cfg.check_host, cfg.check_port,
                               min(cfg.timeout, 6), True)
             if cur.alive is not True:
                 cur = None
         if cur is None:
-            print("checking a few proxies to start on a working one…", flush=True)
+            print("checking a few proxies to start on a working oneâ€¦", flush=True)
             cur = await pick_verified_start(pool, cfg)
         print(f"current IP  {cur.label if cur else 'NONE (add proxies)'}")
         if not cfg.no_hotkey:
@@ -1372,14 +1386,19 @@ async def run(cfg) -> None:
         tasks.append(asyncio.create_task(check_task()))
 
         async def monitor_current():
-            # keep telling the UI whether the selected IP is still reachable
+            # keep telling the UI whether the selected IP is still reachable,
+            # and auto-recover when it dies (a VPN reconnects; so does this)
             while True:
                 p = pool.current
                 if p is not None:
                     await check_proxy(p, cfg.check_host, cfg.check_port,
                                       min(cfg.timeout, 6), True)
                     pool.current_ok = p.alive is True
-                await asyncio.sleep(20)
+                    if not pool.current_ok and cfg.mode == "manual":
+                        nxt = await advance_verified(pool, cfg, fallback=True)
+                        if nxt is not None:
+                            print(f"[auto] dead IP replaced -> {nxt.label}", flush=True)
+                await asyncio.sleep(15)
         tasks.append(asyncio.create_task(monitor_current()))
 
     try:

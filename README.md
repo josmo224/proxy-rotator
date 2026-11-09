@@ -94,7 +94,10 @@ The big number on the Rotate tab is the **exit IP** — the address websites act
 see. It is verified over HTTPS, so it matches what Google shows when you search
 "what is my ip".
 
-If the current IP dies, the app shows *"This IP stopped responding — press NEW IP"*.
+If the current IP dies, the app shows *"This IP stopped responding — press NEW IP"*
+and, more importantly, **fails over automatically**: a dead proxy is replaced
+mid-request (and by a background monitor within ~15 s) so you stay connected.
+The exit IP shown is re-verified after every change.
 
 ## Command line usage
 
