@@ -168,10 +168,20 @@ Realistic yield: of ~34,000 raw entries, roughly 5% work, giving around
 
 ### High-quality, stable pool + hourly refresh
 
-The app uses **only high-quality proxies**: alive right now, latency ≤ 1500 ms,
-and **passed at least two separate checks**. Every check increments a proxy's
-`ok_count`, so flaky proxies that work once and die are dropped automatically.
-Tune the bar with `--quality-latency` and `--quality-min-ok`.
+The app uses **only high-quality proxies**: alive right now, **passed at least two
+separate checks**, and within the latency cutoff (default 3 s, ranked fastest-first).
+Every check increments a proxy's `ok_count`, so flaky proxies that work once and
+die are dropped automatically. Tune the bar with `--quality-latency` and
+`--quality-min-ok`.
+
+Measuring speed accurately matters: checking hundreds of proxies in parallel
+inflates their apparent latency. `--finalize` re-measures the surviving proxies a
+few at a time so the exported list reflects real speed:
+
+```bat
+python fetch_proxies.py --finalize          :: honest timing of alive proxies
+python fetch_proxies.py --export-only       :: rebuild proxies.txt from the database
+```
 
 Install the hourly refresh (Windows Task Scheduler):
 

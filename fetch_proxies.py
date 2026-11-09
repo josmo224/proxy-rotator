@@ -198,25 +198,59 @@ def main() -> int:
                     help="re-check proxies currently marked dead (false negatives from a busy run)")
     ap.add_argument("--hourly", action="store_true",
                     help="fast hourly mode: download new lists and re-check only live candidates")
-    ap.add_argument("--quality-latency", type=float, default=1500,
-                    help="max latency (ms) for a proxy to count as high quality")
+    ap.add_argument("--export-only", action="store_true",
+                    help="don't download or check; just rebuild proxies.txt from the database")
+    ap.add_argument("--finalize", action="store_true",
+                    help="re-measure alive proxies at low concurrency for accurate latency")
+    ap.add_argument("--final-concurrency", type=int, default=12,
+                    help="concurrency for --finalize (low, so timings are honest)")
+    ap.add_argument("--quality-latency", type=float, default=3000,
+                    help="max best-observed latency (ms) for a proxy to count as high quality")
     ap.add_argument("--quality-min-ok", type=int, default=2,
                     help="checks a proxy must have passed to count as stable")
     cfg = ap.parse_args()
 
     t0 = time.time()
     store = ProxyStore(cfg.db)
-    proxies = fetch_all(cfg.download_timeout)
-    if not proxies:
-        print("no proxies downloaded (network blocked?)")
-        return 1
-    existing = store.all_keys()
-    fresh = [p for p in proxies if p.key not in existing]
-    new = store.add_many(proxies)
-    print(f"\n{len(proxies)} unique proxies downloaded in {time.time()-t0:.0f}s"
-          f" ({new} never seen before)")
 
-    if cfg.hourly:
+    if cfg.export_only:
+        quality = store.quality_keys(cfg.quality_latency, cfg.quality_min_ok)
+        out = Path(cfg.out)
+        write_proxies(out, quality, cfg.append)
+        st = store.stats()
+        store.close()
+        print(f"saved {len(quality)} HIGH-QUALITY proxies to {out.resolve()}"
+              f"  (best <= {cfg.quality_latency:.0f} ms, passed >= {cfg.quality_min_ok} checks)")
+        print(f"database: {st['total']} seen, {st['unique_ips']} unique IPs, "
+              f"{st['alive']} alive, {st['quality']} high-quality")
+        return 0
+
+    if cfg.finalize:
+        # Honest timing pass: measure only the currently-alive proxies, a few at
+        # a time, so latency is not distorted by hundreds of parallel handshakes.
+        check_list = [rotator.Proxy(s, h, pt) for k, s, h, pt in store.alive_entries()]
+        print(f"finalize: re-measuring {len(check_list)} alive proxies "
+              f"at concurrency {cfg.final_concurrency}")
+        cfg.concurrency = cfg.final_concurrency
+        cfg.limit = 0
+        if not check_list:
+            store.close()
+            print("nothing alive to measure")
+            return 1
+    else:
+        proxies = fetch_all(cfg.download_timeout)
+        if not proxies:
+            print("no proxies downloaded (network blocked?)")
+            return 1
+        existing = store.all_keys()
+        fresh = [p for p in proxies if p.key not in existing]
+        new = store.add_many(proxies)
+        print(f"\n{len(proxies)} unique proxies downloaded in {time.time()-t0:.0f}s"
+              f" ({new} never seen before)")
+
+    if cfg.finalize:
+        pass                     # check_list is already built from alive proxies
+    elif cfg.hourly:
         # Busy-hour mode: check only brand-new proxies plus the ones currently
         # believed alive. The 40k dead/history entries are not re-scanned.
         seen = {p.key for p in fresh}

@@ -49,6 +49,7 @@ class ProxyStore:
         for name, ddl in (
             ("ok_count", "INTEGER NOT NULL DEFAULT 0"),
             ("check_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("best_ms", "REAL"),
         ):
             if name not in cols:
                 self.db.execute(f"ALTER TABLE proxies ADD COLUMN {name} {ddl}")
@@ -98,7 +99,11 @@ class ProxyStore:
         self.db.executemany(
             "UPDATE proxies SET alive=?, latency_ms=?, successes=?, failures=?,"
             " last_error=?, last_check=?, check_count=check_count+1,"
-            " ok_count=ok_count+? WHERE key=?", rows,
+            " ok_count=ok_count+?,"
+            " best_ms=CASE WHEN ?=1 THEN MIN(COALESCE(best_ms, 1e9), COALESCE(?,1e9))"
+            "               ELSE best_ms END"
+            " WHERE key=?",
+            [r[:7] + (r[0],) + (r[1],) + (r[7],) for r in rows],
         )
         self.db.commit()
 
@@ -122,14 +127,14 @@ class ProxyStore:
             (cutoff, limit),
         ))
 
-    def quality_keys(self, max_latency_ms: float = 1500, min_ok: int = 2) -> list[str]:
-        """High-quality pool: alive now, fast, and proven across multiple checks."""
+    def quality_keys(self, max_latency_ms: float = 3000, min_ok: int = 2) -> list[str]:
+        """High-quality pool: alive, proven across checks, and fast at its best."""
         return [r[0] for r in self.db.execute(
             "SELECT key FROM proxies"
-            " WHERE alive=1 AND latency_ms IS NOT NULL AND latency_ms <= ?"
-            " AND ok_count >= ?"
-            " ORDER BY latency_ms",
-            (max_latency_ms, min_ok),
+            " WHERE alive=1 AND ok_count >= ?"
+            " AND COALESCE(best_ms, latency_ms, 1e9) <= ?"
+            " ORDER BY COALESCE(best_ms, latency_ms, 1e9)",
+            (min_ok, max_latency_ms),
         )]
 
     def all_keys(self) -> set[str]:
@@ -164,8 +169,8 @@ class ProxyStore:
         )
         total, alive, dead, hosts, checked_24h = cur.fetchone()
         quality = self.db.execute(
-            "SELECT COUNT(*) FROM proxies WHERE alive=1"
-            " AND latency_ms IS NOT NULL AND latency_ms <= 1500 AND ok_count >= 2"
+            "SELECT COUNT(*) FROM proxies WHERE alive=1 AND ok_count >= 2"
+            " AND COALESCE(best_ms, latency_ms, 1e9) <= 3000"
         ).fetchone()[0]
         return {
             "total": total or 0,
