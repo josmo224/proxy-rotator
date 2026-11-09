@@ -492,7 +492,13 @@ async function switchIp() {
   const old = b.innerHTML; b.innerHTML = 'switching…';
   exitIp = null;
   try {
-    await fetch('/switch', {method: 'POST'});
+    const r = await fetch('/switch', {method: 'POST'});
+    const j = await r.json();
+    if (j.cycle_reset) {
+      $('proxyaddr').textContent = 'pool cycle restarted (every IP had been used)';
+    } else if (!j.ok) {
+      $('proxyaddr').textContent = 'no working proxy available right now';
+    }
   } catch (e) {}
   lastReq = null; await load();
   b.disabled = false; b.innerHTML = old;

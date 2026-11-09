@@ -8,6 +8,7 @@ already used.
 - **VPN mode** — one switch sends Windows system traffic (browser and most apps) through the app.
 - **NEW IP** — instantly switches to a different, never-before-used IP address.
 - **Never reuses an IP** — remembers used addresses in `used.txt`, even across restarts.
+  When every address has been used, NEW IP starts a fresh cycle instead of doing nothing.
 - **Verified proxies only** — a proxy is used only after it completes a real HTTPS request.
 - **Fast-first** — proxies are ranked by measured latency; dead ones drop out automatically.
 

@@ -256,11 +256,12 @@ class ProxyPool:
         ips = {p.ip for p in self.proxies if p.alive is not False and p.ip not in self.used}
         return len(ips)
 
-    def advance(self, fallback: bool = False) -> Proxy | None:
+    def advance(self, fallback: bool = False, exclude: set[str] | None = None) -> Proxy | None:
         """Move the 'current' IP to the next unused address: fastest HTTP first.
 
         fallback=True is used for failover: if every address has been used, a
         working proxy is better than no connection at all."""
+        exclude = exclude or set()
         if not self.proxies:
             self._cur = None
             return None
@@ -273,7 +274,8 @@ class ProxyPool:
             return (fam, lat)
 
         # never offer an address we have already used (any port on it)
-        pool = [p for p in self.proxies if p.ip not in self.used]
+        pool = [p for p in self.proxies
+                if p.ip not in self.used and p.key not in exclude]
         verified = [p for p in pool if p.alive is True]
         if verified:
             pool = verified
@@ -298,7 +300,8 @@ class ProxyPool:
         if fallback:
             # every address is used (or the pool is tiny): stay online rather
             # than leave the user with no connection
-            cands = [p for p in self.proxies if p.alive is not False and p is not self._cur]
+            cands = [p for p in self.proxies
+                     if p.alive is not False and p is not self._cur and p.key not in exclude]
             cands.sort(key=rank)
             if cands:
                 self._cur = cands[0]
@@ -1130,13 +1133,24 @@ async def handle_status(reader, writer, pool: ProxyPool, stats: Stats, cfg) -> N
                     "ok": False, "error": f"{type(exc).__name__}: {exc}"[:160]}).encode())
         elif path == "/switch" and method == "POST":
             p = await advance_verified(pool, cfg)
+            cycled = False
+            if p is None:
+                # Every address has been used already. NEW IP must still do
+                # something useful, so begin a fresh cycle over the pool.
+                cur_key = pool.current.key if pool.current else None
+                pool.reset_used()
+                p = await advance_verified(
+                    pool, cfg, fallback=True,
+                    exclude={cur_key} if cur_key else None,
+                )
+                cycled = True
             if p is None:
                 await send(200, "application/json", json.dumps({
                     "ok": False, "current": None, "remaining": pool.remaining(),
                 }).encode())
                 return
             await send(200, "application/json", json.dumps({
-                "ok": True,
+                "ok": True, "cycle_reset": cycled,
                 "current": p.label,
                 "remaining": pool.remaining(),
             }).encode())
@@ -1183,13 +1197,14 @@ async def handle_status(reader, writer, pool: ProxyPool, stats: Stats, cfg) -> N
 
 
 async def advance_verified(pool: ProxyPool, cfg, tries: int = 4,
-                           fallback: bool = False) -> Proxy | None:
+                           fallback: bool = False,
+                           exclude: set[str] | None = None) -> Proxy | None:
     """Advance until we land on a proxy that actually works, so one press of
     NEW IP always yields a usable IP. Unverified ones are not burned."""
     if cfg.no_check:
-        return pool.advance(fallback=fallback)
+        return pool.advance(fallback=fallback, exclude=exclude)
     for _ in range(tries):
-        p = pool.advance(fallback=fallback)
+        p = pool.advance(fallback=fallback, exclude=exclude)
         if p is None:
             return None
         await check_proxy(p, cfg.check_host, cfg.check_port, min(cfg.timeout, 5), True)

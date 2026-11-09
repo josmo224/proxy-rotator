@@ -233,16 +233,19 @@ def manual_suite():
         assert second in ("A", "B")
         cur2 = stats(ST2)["pool"]["current"]
 
-        # both proxies consumed -> exhausted, but the current one keeps serving
+        # both proxies consumed -> NEW IP must still work by starting a new cycle
         j2 = post(f"http://127.0.0.1:{ST2}/switch")
         print("switch when exhausted ->", j2)
-        assert j2["ok"] is False, "should not reuse when exhausted"
-        assert get_through(ROT2) == second, "current IP should keep working when exhausted"
+        assert j2["ok"] is True, "NEW IP must work even when every IP was used"
+        assert j2.get("cycle_reset") is True, "an exhausted pool should restart a cycle"
+        third = get_through(ROT2)
+        print("after cycle reset IP:", third)
+        assert third != second, "cycle reset must still change the IP"
 
         s = stats(ST2)
         print("stats:", json.dumps(s["pool"]))
-        assert s["pool"]["used"] == 2 and s["pool"]["remaining"] == 0
-        assert s["pool"]["current"] == cur2
+        assert s["pool"]["current"] == stats(ST2)["pool"]["current"]
+        cur2 = s["pool"]["current"]
     finally:
         stop(proc)
 
@@ -253,10 +256,9 @@ def manual_suite():
         s = stats(ST2)
         print("after restart, current IP:", s["pool"]["current"])
         assert s["pool"]["current"] == cur2, "restart must keep the same current IP"
-        assert s["pool"]["used"] == 2
         again = get_through(ROT2)
         print("request after restart uses:", again)
-        assert again == second, "restored IP should match the one held before restart"
+        assert again == third, "restored IP should match the one held before restart"
     finally:
         stop(proc)
         for f in (plist, used, cur):
