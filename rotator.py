@@ -1123,7 +1123,11 @@ async def handle_status(reader, writer, pool: ProxyPool, stats: Stats, cfg) -> N
         elif path == "/browser" and method == "POST":
             try:
                 import browser_launcher
-                fp = browser_launcher.launch(f"{cfg.host}:{cfg.port}")
+                # launching attaches over CDP synchronously; keep the event loop free
+                loop = asyncio.get_running_loop()
+                fp = await loop.run_in_executor(
+                    None, browser_launcher.launch, f"{cfg.host}:{cfg.port}"
+                )
                 await send(200, "application/json",
                            json.dumps({"ok": True, **fp}).encode())
             except Exception as exc:  # noqa: BLE001

@@ -12,7 +12,7 @@ already used.
 - **Verified proxies only** — a proxy is used only after it completes a real HTTPS request.
 - **Fast-first** — proxies are ranked by measured latency; dead ones drop out automatically.
 - **Open browser** — launches Chrome/Edge in a fresh isolated profile on the current IP,
-  with a new user agent, screen size and language each time.
+  with a new device identity (user agent, screen, CPU/memory, GPU, canvas and audio noise).
 
 > Free proxies are inherently unreliable and slow compared to a paid VPN. This tool
 > makes the best of them: it downloads thousands, tests them, keeps the working ones,
@@ -106,16 +106,32 @@ The exit IP shown is re-verified after every change.
 
 Press **Open browser** (or tick *auto-open on NEW IP*). Each launch starts a
 **fresh Chrome/Edge profile** — no cookies, storage, cache or history — routed
-through the app's proxy, with:
+through the app's proxy, with a **new device identity** injected before the page
+loads:
 
-- a user agent matching the browser version actually installed
-- a randomly chosen common screen size (1280×720 … 2560×1440)
-- a randomly chosen language
-- WebRTC restricted to the proxy so the real IP does not leak
+| signal | how it changes per launch |
+|---|---|
+| profile | brand-new directory (cookies, localStorage, IndexedDB, cache, history) |
+| user agent | matches the browser version actually installed |
+| screen | random common resolution (1280×720 … 2560×1440), also reported by `screen.*` |
+| platform / languages | `Win32`, `en-US` or `en-GB`, reported consistently |
+| CPU / memory | `navigator.hardwareConcurrency` and `deviceMemory` randomised |
+| GPU | WebGL vendor + renderer (unmasked) set to a plausible matching pair |
+| canvas | deterministic per-session pixel noise in `toDataURL`, `toBlob`, `getImageData` |
+| audio | deterministic per-session noise in `getFloatFrequencyData` |
+| WebRTC | pinned to the proxy so the real IP does not leak |
 
-Profiles live in `%LOCALAPPDATA%\ProxyRotator\profiles` (the newest 25 are kept).
-This is profile isolation with coherent metadata, **not** a full anti-detect
-browser — canvas, WebGL and font fingerprints are not spoofed.
+Values are coherent within a session: a machine reporting an Intel GPU never
+reports 16 cores and an AMD renderer at the same time.
+
+Profiles live in `%LOCALAPPDATA%\ProxyRotator\profiles` (newest 25 kept).
+
+> **Limits.** This covers the signals most fingerprinting scripts read, but it is
+> not a guarantee against every detector — TLS/JA3, installed fonts, some
+> WebGL readback and behavioural signals are unchanged. Chrome stays reachable
+> on a random loopback DevTools port while it is open (needed for the injection),
+> so this is for privacy on a machine you control, not a hardened anti-detect
+> product.
 
 ## Command line usage
 

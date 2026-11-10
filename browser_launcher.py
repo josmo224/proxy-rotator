@@ -22,11 +22,6 @@ import time
 import uuid
 from pathlib import Path
 
-_RESOLUTIONS = [
-    (1920, 1080), (1536, 864), (1600, 900), (1366, 768),
-    (1440, 900), (1680, 1050), (1280, 720), (2560, 1440),
-]
-_LANGS = ["en-US", "en-US", "en-US", "en-GB"]
 _MAX_PROFILES = 25
 
 
@@ -121,29 +116,23 @@ def make_fingerprint() -> dict:
     exe, kind, version = find_browser()
     if not exe:
         raise RuntimeError("No Chrome or Edge found on this system")
-    major = (version.split(".")[0] if version else "131")
-    w, h = random.choice(_RESOLUTIONS)
-    lang = random.choice(_LANGS)
-
-    if kind == "edge":
-        ua = (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-              f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36 Edg/{major}.0.0.0")
-    else:
-        ua = (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-              f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36")
-
-    return {"exe": exe, "browser": kind, "version": version or major,
-            "user_agent": ua, "window": [w, h], "lang": lang}
+    import fingerprint
+    fp = fingerprint.make(version, kind)
+    fp["exe"] = exe
+    return fp
 
 
-def launch(proxy_addr: str, start_url: str = "https://api.ipify.org") -> dict:
+def launch(proxy_addr: str, start_url: str = "https://api.ipify.org",
+           headless: bool = False) -> dict:
+    import fingerprint
+
     fp = make_fingerprint()
     root = _profile_root()
     _prune(root)
     profile = root / uuid.uuid4().hex[:12]
     profile.mkdir(parents=True, exist_ok=True)
-
     w, h = fp["window"]
+
     args = [
         fp["exe"],
         f"--proxy-server=http://{proxy_addr}",
@@ -156,22 +145,57 @@ def launch(proxy_addr: str, start_url: str = "https://api.ipify.org") -> dict:
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-sync",
-        start_url,
+        "--disable-extensions",
+        "--remote-debugging-port=0",
+        "about:blank",
     ]
-    subprocess.Popen(args, close_fds=True,
-                     creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+    if headless:
+        args.insert(1, "--headless=new")
+
+    proc = subprocess.Popen(args, close_fds=True,
+                            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+
+    # Wait for DevTools, then install the identity before the first navigation.
+    injected = False
+    port = 0
+    try:
+        port_file = profile / "DevToolsActivePort"
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if port_file.exists():
+                try:
+                    port = int(port_file.read_text().splitlines()[0].strip())
+                    break
+                except (ValueError, IndexError):
+                    pass
+            time.sleep(0.1)
+        if port:
+            fingerprint.apply(port, fp, start_url)
+            injected = True
+    except Exception as exc:
+        injected = False
+        inject_error = f"{type(exc).__name__}: {exc}"[:160]
+    else:
+        inject_error = ""
 
     fp_out = {
-        "browser": fp["browser"],
+        "browser": fp["kind"],
         "version": fp["version"],
         "user_agent": fp["user_agent"],
         "window": f"{w}x{h}",
         "lang": fp["lang"],
+        "hardware_concurrency": fp["hardware_concurrency"],
+        "device_memory": fp["device_memory"],
+        "webgl_renderer": fp["webgl_renderer"],
+        "fingerprint_injected": injected,
+        "inject_error": inject_error,
+        "devtools_port": port,
         "profile": str(profile),
         "opened_at": time.time(),
     }
     try:
-        (profile / "fingerprint.json").write_text(json.dumps(fp_out, indent=2), encoding="utf-8")
+        (profile / "fingerprint.json").write_text(
+            json.dumps({**fp, "exe": None}, indent=2), encoding="utf-8")
     except OSError:
         pass
     return fp_out
