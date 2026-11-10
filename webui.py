@@ -216,6 +216,11 @@ textarea::placeholder{color:var(--muted)}
             NEW IP
           </button>
           <button class="btn-2" onclick="checkIp()">verify exit IP</button>
+          <button class="btn-2" onclick="openBrowser()" title="New isolated profile, routed through this IP">Open browser</button>
+          <label class="btn-2" style="display:flex;gap:7px;align-items:center;cursor:pointer">
+            <input type="checkbox" id="autobrowser" style="margin:0">
+            auto-open on NEW IP
+          </label>
           <button class="btn-2" id="systoggle" onclick="toggleSysProxy()" title="Route all apps through this app">Enable VPN mode</button>
         </div>
       </div>
@@ -503,6 +508,23 @@ async function switchIp() {
   lastReq = null; await load();
   b.disabled = false; b.innerHTML = old;
   verifyIp();                 // confirm the new IP automatically
+  if ($('autobrowser') && $('autobrowser').checked) openBrowser();
+}
+
+async function openBrowser() {
+  $('proxyaddr').textContent = 'opening browser…';
+  try {
+    const r = await fetch('/browser', {method: 'POST'});
+    const j = await r.json();
+    if (j.ok) {
+      $('proxyaddr').textContent =
+        `browser opened · ${j.browser} ${j.version} · ${j.window} · ${j.lang}`;
+    } else {
+      $('proxyaddr').textContent = 'browser launch failed: ' + (j.error || 'unknown');
+    }
+  } catch (e) {
+    $('proxyaddr').textContent = 'browser launch failed';
+  }
 }
 
 async function verifyIp() {

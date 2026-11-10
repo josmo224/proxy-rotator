@@ -1120,6 +1120,15 @@ async def handle_status(reader, writer, pool: ProxyPool, stats: Stats, cfg) -> N
         elif path == "/fetch-status":
             body = {"running": _fetch_task["running"], "result": _fetch_task["result"]}
             await send(200, "application/json", json.dumps(body).encode())
+        elif path == "/browser" and method == "POST":
+            try:
+                import browser_launcher
+                fp = browser_launcher.launch(f"{cfg.host}:{cfg.port}")
+                await send(200, "application/json",
+                           json.dumps({"ok": True, **fp}).encode())
+            except Exception as exc:  # noqa: BLE001
+                await send(200, "application/json", json.dumps({
+                    "ok": False, "error": f"{type(exc).__name__}: {exc}"[:200]}).encode())
         elif path == "/sysproxy" and method == "POST":
             cl = int(get_header(headers, "content-length") or 0)
             raw = await reader.readexactly(cl) if cl else b""

@@ -11,6 +11,8 @@ already used.
   When every address has been used, NEW IP starts a fresh cycle instead of doing nothing.
 - **Verified proxies only** — a proxy is used only after it completes a real HTTPS request.
 - **Fast-first** — proxies are ranked by measured latency; dead ones drop out automatically.
+- **Open browser** — launches Chrome/Edge in a fresh isolated profile on the current IP,
+  with a new user agent, screen size and language each time.
 
 > Free proxies are inherently unreliable and slow compared to a paid VPN. This tool
 > makes the best of them: it downloads thousands, tests them, keeps the working ones,
@@ -99,6 +101,21 @@ If the current IP dies, the app shows *"This IP stopped responding — press NEW
 and, more importantly, **fails over automatically**: a dead proxy is replaced
 mid-request (and by a background monitor within ~15 s) so you stay connected.
 The exit IP shown is re-verified after every change.
+
+### Opening a browser on the current IP
+
+Press **Open browser** (or tick *auto-open on NEW IP*). Each launch starts a
+**fresh Chrome/Edge profile** — no cookies, storage, cache or history — routed
+through the app's proxy, with:
+
+- a user agent matching the browser version actually installed
+- a randomly chosen common screen size (1280×720 … 2560×1440)
+- a randomly chosen language
+- WebRTC restricted to the proxy so the real IP does not leak
+
+Profiles live in `%LOCALAPPDATA%\ProxyRotator\profiles` (the newest 25 are kept).
+This is profile isolation with coherent metadata, **not** a full anti-detect
+browser — canvas, WebGL and font fingerprints are not spoofed.
 
 ## Command line usage
 
